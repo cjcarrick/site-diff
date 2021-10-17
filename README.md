@@ -1,44 +1,56 @@
-A script to check for differences in a website. Example uses: in stock alerts, follower count change,
+A script to check for differences in a website. Example uses include in stock alerts, follower count change, or [checking Steam every 10 minutes for half-life 3](https://store.steampowered.com/search/?term=half+life+3).
 
 ### Usage
 
+One-liner, no download required:
 ```
-/bin/bash $(curl ________) <url> [options]
+wget -qO- https://raw.githubusercontent.com/cjcarrick/site-diff/master/site-diff | bash -s -- -l <URL> [options]
 ```
 
-### Options (`site-diff --help`)
-
+Or [download the script](https://raw.githubusercontent.com/cjcarrick/site-diff/master/site-diff), `chmod +x` it, and save on a precious 12 KB on your ISP's data cap each time you run it:
 ```
-    -l, --link <link>            Required. URL to retrieve the page from.
-    -d, --dir <directory>        Specify a specific directory to use instead of the
-                                 environment variable $TMPDIR.
-    -s, --selector <selector>    Requires pup. Match HTML according to CSS selectors.
-                                 Pretty-print HTML using an empty selector.
-    -i, --interval <number>      Override the default interval.
+site-diff -l <link> [options]
+```
 
-    -p, --pupargs <options>      Supply additional options for pup.
-    -c, --curlargs <options>     Supply your own options for cURL, overriding the 
-                                 default (-s in quiet mode, -v in verbose mode).
-    -f, --diffargs <options>     Override the default options (--ignore-all-space
-                                 --minimal --ignore-case --side-by-side --text
-                                 --suppress-common-lines) for diff.
+### Options
+```
+-l, --link <link>            Required. URL to retrieve the page from.
+-d, --dir <directory>        Specify a specific directory to use instead of the
+                             environment variable $TMPDIR.
+-s, --selector <selector>    Requires pup. Match HTML according to CSS selectors.
+                             Pretty-print HTML using an empty selector.
+-i, --interval <number>      Override the default interval.
 
-    -h, --help                   Print this help message and exit.
-    -q, --quiet                  Does not print anything to STDOUT.
-    -v, --verbose                Print debugging information for cURL and more info
-                                 about what the script is doing.
-    -w, --write                  Write diffs to STDOUT. If used with --quiet, diffs 
-                                 will still be written to STDOUT.
-    -o, --open                   Attempt to open the URL in your default browser
-                                 when a change is found.
-    -e, --exit                   Exit when a diff is found. If used with --write
-                                 and --open, the browser will open and diffs will
-                                 be printed, then the script exit.
+-p, --pupargs <options>      Supply additional options for pup.
+-c, --curlargs <options>     Supply your own options for cURL, overriding the 
+                             default (-s in quiet mode, -v in verbose mode).
+-f, --diffargs <options>     Override the default options (--ignore-all-space
+                             --minimal --ignore-case --side-by-side --text
+                             --suppress-common-lines) for diff.
+
+-h, --help                   Print this help message and exit.
+-q, --quiet                  Does not print anything to STDOUT.
+-v, --verbose                Print debugging information for cURL and more info
+                             about what the script is doing.
+-w, --write                  Write diffs to STDOUT. If used with --quiet, diffs 
+                             will still be written to STDOUT.
+-o, --open                   Attempt to open the URL in your default browser
+                             when a change is found.
+-e, --exit                   Exit when a diff is found. If used with --write
+                             and --open, the browser will open and diffs will
+                             be printed, then the script exit.
 ```
 
 ### If you intend to use selectors
 
-You need to have [`pup`](https://github.com/ericchiang/pup/).
+You need to have [`pup`](https://github.com/ericchiang/pup/). Pass in selectors like this:
+
+```
+# Check for a change in the number of like at https://www.youtube.com/watch?v=bXEddCLW3SM
+site-diff -l https://www.youtube.com/watch?v=bXEddCLW3SM -s "style-scope.ytd-menu-renderer.force-icon-button.style-text"
+```
+
+See pup's docs for info on supported selectors.
 
 ### Formatting
 
