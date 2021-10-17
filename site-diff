@@ -1,0 +1,282 @@
+#!/bin/bash
+
+die() {
+    echo "$*" >&2
+    exit 2
+} # complain to STDERR and exit with error
+needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
+
+die() {
+    echo "$*" >&2
+    exit 2
+} # complain to STDERR and exit with error
+needs_arg() { if [ -z "$OPTARG" ]; then die "No arg for --$OPT option"; fi; }
+
+while getopts hvc:l:d:s:i:oqf:w:pe-: OPT; do
+    # support long options: https://stackoverflow.com/a/28466267/519360
+    if [ "$OPT" = "-" ]; then   # long option: reformulate OPT and OPTARG
+        OPT="${OPTARG%%=*}"     # extract long option name
+        OPTARG="${OPTARG#$OPT}" # extract long option argument (may be empty)
+        OPTARG="${OPTARG#=}"    # if long option argument, remove assigning `=`
+    fi
+    case "$OPT" in
+    h | help)
+        echo "Usage"
+        echo "    site-diff -l <link> [options]"
+        echo "Version"
+        echo "    0.1.0"
+        echo "Options"
+        echo "    -l, --link <link>            Required. URL to retrieve the page from."
+        echo "    -d, --dir <directory>        Specify a specific directory to use instead of the"
+        echo "                                 environment variable \$TMPDIR."
+        echo "    -s, --selector <selector>    Requires pup. Match HTML according to CSS selectors."
+        echo "                                 Pretty-print HTML using an empty selector."
+        echo "    -i, --interval <number>      Override the default interval."
+        echo
+        echo "    -p, --pupargs <options>      Supply additional options for pup."
+        echo "    -c, --curlargs <options>     Supply your own options for cURL, overriding the "
+        echo "                                 default (-s in quiet mode, -v in verbose mode)."
+        echo "    -f, --diffargs <options>     Override the default options (--ignore-all-space"
+        echo "                                 --minimal --ignore-case --side-by-side --text"
+        echo "                                 --suppress-common-lines) for diff."
+        echo
+        echo "    -h, --help                   Print this help message and exit."
+        echo "    -q, --quiet                  Does not print anything to STDOUT."
+        echo "    -v, --verbose                Print debugging information for cURL and more info"
+        echo "                                 about what the script is doing."
+        echo "    -w, --write                  Write diffs to STDOUT. If used with --quiet, diffs "
+        echo "                                 will still be written to STDOUT."
+        echo "    -o, --open                   Attempt to open the URL in your default browser"
+        echo "                                 when a change is found."
+        echo "    -e, --exit                   Exit when a diff is found. If used with --write"
+        echo "                                 and --open, the browser will open and diffs will"
+        echo "                                 be printed, then the script exit."
+        echo
+        echo "Contribute, report issues, and get updates at"
+        echo "https://www.github.com/cjcarrick/site-diff."
+        exit 0
+        ;;
+    l | link)
+        link="$OPTARG"
+        ;;
+    q | quiet)
+        quiet=true
+        ;;
+    v | verbose)
+        verbose=true
+        ;;
+    d | dir)
+        dir="$OPTARG"
+        ;;
+    s | selector)
+        selector="$OPTARG"
+        ;;
+    i | interval)
+        interval="$OPTARG"
+        ;;
+    c | curlargs)
+        curlargs="$OPTARG"
+        ;;
+    f | diffargs)
+        diffargs="$OPTARG"
+        ;;
+    p | pupargs)
+        pupargs="$OPTARG"
+        ;;
+    o | open)
+        open=true
+        ;;
+    w | write)
+        print=true
+        ;;
+    e | exit)
+        exit=true
+        ;;
+
+    ??*) die "Illegal option --$OPT" ;; # bad long option
+    ?) exit 2 ;;                        # bad short option (error reported via getopts)
+
+    esac
+done
+
+shift $((OPTIND - 1)) # remove parsed options and args from $@ list
+
+# handle link
+if [[ -z "$link" ]]; then
+    [[ ! "$quiet" = true ]] && echo "No link argument provided"
+    exit 1
+fi
+
+# handle diff args
+if [[ -z "$diffargs" ]]; then
+    # default args
+    diffargs="--ignore-all-space --minimal --ignore-case --side-by-side --text --suppress-common-lines"
+fi
+diffargs=($diffargs)
+# convert string of args to an array (https://stackoverflow.com/a/12137030/9341146)
+
+# come up with an abbreviation that has no illegal characters
+abbrev=site-diff-$(echo "$link" | grep -oE '[^\/\/:\*\?"<>\|\.]' | tr -d '\n')
+
+# handle directory
+if [[ -n "$dir" ]]; then
+    if [[ ! -d "$dir" ]]; then
+        [[ ! "$quiet" = true ]] && echo "$dir is not a directory."
+        exit 1
+    else
+        # add a / to the end of the directory if its missing one
+        [[ ! "$dir" =~ \/$ ]] && dir+="/"
+
+        dir+=$abbrev/
+    fi
+else
+    if [[ -z "$TMPDIR" ]]; then
+        [[ ! "$quiet" = true ]] && echo "No \$TMPDIR environment variable set. Use -d to set a directory to use or set \$TMPDIR yourself."
+        exit 1
+    else
+        if [[ -d "$TMPDIR" ]]; then
+            dir="$TMPDIR"
+
+            # add a / to the end of the directory if its missing one
+            [[ ! "$dir" =~ \/$ ]] && dir+="/"
+
+            dir+=$abbrev/
+
+        else
+            [[ ! "$quiet" ]] && echo "\$TMPDIR $TMPDIR is not a valid directory"
+            exit 1
+        fi
+    fi
+fi
+
+[[ ! -d "$dir" ]] && mkdir "$dir"
+
+# handle interval
+if [[ -n "$interval" ]]; then
+    if [[ "$interval" -le 1 ]]; then
+        echo "Invalid value for interval. Exepcted an integer greater than or equal to 1, but instead got $interval."
+    fi
+else
+    interval=10
+fi
+
+# main loop
+while true; do
+
+    # double check that the directory is still there
+    if [[ ! -d "$dir" ]]; then
+        echo "[$(date)] Directory deleted. Aborting..."
+        exit 1
+    fi
+
+    # check if there is a saved site at the $dir, and rename it for later if there is
+    if [[ "$verbose" = true ]] && [[ ! "$quiet" = true ]]; then
+        if [[ -e "$dir"site-diff.temp ]]; then
+            echo "[$(date)] Found old file at ${dir}site-diff.temp"
+            mv "$dir"site-diff.temp "$dir"site-diff.temp.old
+        else
+            echo "[$(date)] No old file found at ${dir}site-diff.temp"
+        fi
+    elif [[ ! "$quiet" = true ]]; then
+        if [[ -e "$dir"site-diff.temp ]]; then
+            echo "[$(date)] Found old file"
+            mv "$dir"site-diff.temp "$dir"site-diff.temp.old
+        else
+            echo "[$(date)] No old file found"
+        fi
+    fi
+
+    # fetch new site
+    if [[ "$verbose" = true ]] && [[ ! "$quiet" = true ]]; then
+        # verbose mode
+
+        echo "[$(date)] Fetching new site and saving to ${dir}site-diff.temp"
+
+        # handle curlargs
+        if [[ -z "$curlargs" ]]; then
+            # default args
+            curlargs="-v"
+        fi
+        # convert string of args to an array (https://stackoverflow.com/a/12137030/9341146)
+        curlargs=($curlargs)
+
+        curl "${curlargs[@]}" "$link" -o "$dir"site-diff.temp
+
+    elif [[ ! "$quiet" = true ]]; then
+        # not quiet or verbose mode
+
+        echo "[$(date)] Fetching new site"
+
+        # handle curlargs
+        if [[ -z "$curlargs" ]]; then
+            # default args
+            curlargs=""
+        fi
+        # convert string of args to an array (https://stackoverflow.com/a/12137030/9341146)
+        curlargs=($curlargs)
+
+        curl "${curlargs[@]}" "$link" -o "$dir"site-diff.temp
+
+    else
+        # quiet mode
+
+        # handle curlargs
+        if [[ -z "$curlargs" ]]; then
+            # default args
+            curlargs="-s"
+        fi
+        # convert string of args to an array (https://stackoverflow.com/a/12137030/9341146)
+        curlargs=($curlargs)
+
+        curl "${curlargs[@]}" "$link" -o "$dir"site-diff.temp
+    fi
+
+    # use pup
+    if [[ -n "$selector" ]]; then
+        if [[ -n "$pupargs" ]]; then
+            if [[ "$pupargs" =~ -f|--file ]]; then
+                echo "Cannot use the --file argument for pup."
+                exit 1
+            fi
+            pupargs=($pupargs)
+        fi
+
+        pup "${pupargs[@]}" -f "$dir"site-diff.temp "$selector" >"$dir"site-diff.selectortemp
+        [[ -s "$dir"site-diff.selectortemp ]] && [[ ! "$quiet" = true ]] && echo "[$(date)] Warning: Selector returned no matches."
+        mv "$dir"site-diff.selectortemp "$dir"site-diff.temp
+    fi
+
+    # find difference
+    if [[ -e "$dir"site-diff.temp.old ]]; then
+
+        diff=$(diff "${diffargs[@]}" "$dir"site-diff.temp.old "$dir"site-diff.temp)
+
+        if [[ "$diff" != "" ]]; then
+            # change detected! :D
+
+            [[ ! "$quiet" = true ]] && echo "[$(date)] Change detected at $link."
+
+            if [[ "$print" = true ]]; then
+                [[ ! "$quiet" = true ]] && echo "[$(date)] Diff:"
+                echo "$diff"
+            fi
+
+            if [[ "$open" = true ]]; then
+                [[ ! "$quiet" = true ]] && echo "[$(date)] Opening..."
+                open "$link"
+            fi
+
+            [[ "$exit" = true ]] && exit 0
+
+        else
+
+            # no change detected :(
+
+            [[ ! "$quiet" = true ]] && echo "[$(date)] No change found at $link."
+
+        fi
+    fi
+
+    [[ ! "$quiet" = true ]] && echo "[$(date)] Waiting $interval seconds"
+    sleep $interval
+done
