@@ -7,7 +7,7 @@ One-liner, no download required:
 wget -qO- https://raw.githubusercontent.com/cjcarrick/site-diff/master/site-diff | bash -s -- -l <URL> [options]
 ```
 
-Or [download the script](https://raw.githubusercontent.com/cjcarrick/site-diff/master/site-diff), `chmod +x` it, and save on a precious 12 KB on your ISP's data cap each time you run it:
+Or [download the script](https://raw.githubusercontent.com/cjcarrick/site-diff/master/site-diff) and run it manually:
 ```
 site-diff -l <link> [options]
 ```
